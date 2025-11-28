@@ -7,9 +7,10 @@ from flask import Flask, request, jsonify
 from langdetect import detect
 from knrm import KNRM
 import string
-import nltk
 import threading
 import dotenv
+import faiss
+import numpy as np
 
 
 dotenv.load_dotenv()
@@ -17,7 +18,7 @@ dotenv.load_dotenv()
 app = Flask(__name__)
 
 helper = None
-faiss_is_ready = False
+k = 10
 
 
 class Helper:
@@ -30,6 +31,10 @@ class Helper:
         self.prepare_model()
         self.glove_embeddings = self._read_glove_embeddings(self.emb_path_glove)
         self.vocab = self._load_vocab(self.vocab_path)
+
+        self.documents = None
+        self.knrm_index = None
+        self.faiss_index = None
 
     def prepare_model(self):
         self.model = KNRM(
@@ -53,11 +58,21 @@ class Helper:
     def simple_preproc(self, inp_str: str) -> List[str]:
         inp_str = self.handle_punctuation(inp_str)
         inp_str = inp_str.lower()
-        return nltk.word_tokenize(inp_str)
+        return inp_str
 
-    def prepoc_query(self, query: List[str]):
-        query = list(map(self.simple_preproc, query))
-        return query
+    def transform_to_glove_embedding(
+        self, glove_embeddings: Dict[str, List[int]], inp_str: str
+    ) -> np.array:
+        processed_document = self.handle_punctuation(inp_str).lower()
+        vector = [
+            glove_embeddings[tok]
+            for tok in processed_document.replace("  ", " ").split(" ")
+            if tok in glove_embeddings
+        ]
+        if vector:
+            vector = np.mean(vector, axis=0)
+            return vector
+        return None
 
     def _read_glove_embeddings(self, file_path: str) -> Dict[str, List[str]]:
         glove_embeddings = {}
@@ -95,25 +110,97 @@ def ping():
 
 @app.route("/query", methods=["POST"])
 def query():
-    # TODO: return json with status='FAISS is not initialized!' if FAISS index was not loaded
+    if not helper.faiss_index:
+        return jsonify(status="FAISS is not initialized!")
     data = request.get_json()
     queries = data["queries"]
     lang_check = []
     suggestions = []
-    for q in queries:
-        is_en = detect(q) == "en"
+    glove_embeddings = helper.glove_embeddings
+    for query in queries:
+        # Language check
+        is_en = detect(query) == "en"
         lang_check.append(is_en)
         if not is_en:
             suggestions.append(None)
             continue
-        processed_query = helper.simple_preproc(q)
+        # Preprocess the query
+        processed_query = helper.simple_preproc(query)
+        vector = helper.transform_to_glove_embedding(glove_embeddings, processed_query)
+        # Search k nearest neighbors in FAISS index
+        _, ann = helper.faiss_index.search(vector.reshape(1, -1), k)
+        ann = ann.ravel()
+        # Embed the query
+
+        # Select corresponding document embeddings from KNRM index and remove duplicates
+        selected_documents = set(tuple(helper.knrm_index[ann_idx]) for ann_idx in ann)
+        selected_documents = [list(document) for document in selected_documents]
+        # Pad the documents to the same length
+        emb_lens = [len(selected_document) for selected_document in selected_documents]
+        max_len = max(emb_lens)
+        selected_documents = [
+            selected_document + [helper.vocab["PAD"]] * (max_len - len(selected_document))
+            for selected_document in selected_documents
+        ]
+
+        embedded_query = torch.LongTensor(
+            [helper.vocab.get(word, helper.vocab["OOV"]) for word in processed_query]
+        ).unsqueeze(0)
+        embedded_query = embedded_query.repeat(len(selected_documents), 1)
+        selected_documents = torch.LongTensor(selected_documents)
+
+        import code
+
+        code.interact(local={**globals(), **locals()})
+
+        # Rank the documents using KNRM model
+        scores = []
+        inputs = dict()
+        inputs["query"] = embedded_query
+        inputs["document"] = selected_documents
+        scores = helper.model.predict(inputs)
+        scores = scores.detach().numpy().ravel()
+        score_idxs = np.argsort(scores)[::-1]
+        suggestion = []
+
+        for ann_idx in ann[score_idxs]:
+            suggestion.append((helper.documents_ids[ann_idx], helper.documents[ann_idx]))
+
+        suggestions.append(suggestion)
+
+    return jsonify(suggestions=suggestions, lang_check=lang_check)
 
 
 @app.route("/update_index", methods=["POST"])
 def update_index():
     data = request.get_json()
     documents = data["documents"]
-    # TODO: generate FAISS index here
+    glove_embeddings = helper.glove_embeddings
+    document_embeddings = []
+    knrm_index = []
+    # Prepare FAISS and KNRM ind
+    for document in documents.values():
+        processed_document = helper.simple_preproc(document).replace("  ", " ")
+        indexed_document = [
+            helper.vocab.get(word, helper.vocab["OOV"]) for word in processed_document.split(" ")
+        ]
+
+        vector = helper.transform_to_glove_embedding(glove_embeddings, processed_document)
+        if vector is not None:
+            document_embeddings.append(vector)
+            knrm_index.append(indexed_document)
+
+    dim = len(list(glove_embeddings.values())[0])
+    index = faiss.IndexFlatL2(dim)
+    index.add(np.vstack(document_embeddings))
+
+    # Update the helper
+    helper.faiss_index = index
+    helper.documents_ids = list(documents.keys())
+    helper.documents = list(documents.values())
+    helper.knrm_index = knrm_index
+
+    return jsonify(status="ok", index_size=index.ntotal)
 
 
 if __name__ == "__main__":
