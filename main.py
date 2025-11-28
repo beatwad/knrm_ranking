@@ -18,7 +18,10 @@ dotenv.load_dotenv()
 app = Flask(__name__)
 
 helper = None
-ann_k = 50
+
+ann_k = 100
+ret_k = 10
+
 languages = [
     Language.ENGLISH,
     Language.RUSSIAN,
@@ -26,6 +29,7 @@ languages = [
     Language.FRENCH,
     Language.GERMAN,
 ]
+lang_detector = LanguageDetectorBuilder.from_languages(*languages).build()
 
 
 class GaussianKernel(torch.nn.Module):
@@ -192,14 +196,7 @@ class Helper:
         glove_embeddings = self.glove_embeddings
         for query in queries:
             # Language check
-            detector = LanguageDetectorBuilder.from_languages(*languages).build()
-            language = detector.detect_language_of(query)
-            try:
-                language = language.iso_code_639_1.name
-                is_en = language == "EN"
-            except Exception:
-                is_en = False
-
+            is_en = self._language_check(query)
             if not is_en:
                 suggestions.append(None)
                 lang_check.append(False)
@@ -236,7 +233,7 @@ class Helper:
             score_idxs = np.argsort(scores)[::-1]
             suggestion = []
             # Get the suggestions
-            for ann_idx in ann[score_idxs]:
+            for ann_idx in ann[score_idxs[:ret_k]]:
                 suggestion.append((self.documents_ids[ann_idx], self.documents[ann_idx]))
             suggestions.append(suggestion)
         return suggestions, lang_check
@@ -279,6 +276,15 @@ class Helper:
         with open(file_path, "r") as f_in:
             vocab = json.load(f_in)
             return vocab
+
+    def _language_check(self, query: str) -> bool:
+        language = lang_detector.detect_language_of(query)
+        try:
+            language = language.iso_code_639_1.name
+            is_en = language == "EN"
+        except Exception:
+            is_en = False
+        return is_en
 
 
 def init_helper():
