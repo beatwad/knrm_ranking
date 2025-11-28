@@ -5,6 +5,7 @@ A document matching system using Kernel Neural Ranking Model (KNRM) and GloVe em
 ## Project Structure
 
 - `main.py`: Flask server with KNRM model and API endpoints.
+- `train.py`: Script for training the KNRM model using the QQP dataset.
 - `test_client.py`: End-to-end test script using QQP dataset.
 - `data/`: Required directory for model artifacts and datasets.
 
@@ -41,6 +42,15 @@ A document matching system using Kernel Neural Ranking Model (KNRM) and GloVe em
    ```
 
 ## Usage
+
+### Train Model
+To retrain the KNRM model:
+```bash
+python train.py
+```
+This script loads QQP data and GloVe embeddings, trains the ranking model using triplet loss, and saves artifacts (`knrm_emb.bin`, `knrm_mlp.bin`, `vocab.json`) to `data/`.
+
+GloVe embeddings can be downloaded from [here](http://nlp.stanford.edu/data/glove.6B.zip).
 
 ### Start Server
 ```bash
