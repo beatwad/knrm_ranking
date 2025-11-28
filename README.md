@@ -1,6 +1,6 @@
-# Neural Ranking System
+# Neural Matching System
 
-A document ranking system using Kernel Neural Ranking Model (KNRM) and GloVe embeddings, served via a Flask REST API. Features FAISS for fast retrieval and language filtering.
+A document matching system using Kernel Neural Ranking Model (KNRM) and GloVe embeddings with FAISS index, served via a Flask REST API. Features language filtering.
 
 ## Project Structure
 
