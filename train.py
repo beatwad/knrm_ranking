@@ -37,7 +37,7 @@ class GaussianKernel(torch.nn.Module):
 class KNRM(torch.nn.Module):
     def __init__(
         self,
-        emb_state_dict,
+        embedding_matrix: np.ndarray,
         freeze_embeddings: bool,
         kernel_num: int = 21,
         sigma: float = 0.1,
@@ -45,13 +45,10 @@ class KNRM(torch.nn.Module):
         out_layers: List[int] = [10, 5],
     ):
         super().__init__()
-        # import code
 
-        # code.interact(local=locals())
-
-        vocab_size, dim = emb_state_dict["weight"].shape
-        self.embeddings = torch.nn.Embedding(vocab_size, dim)
-        self.embeddings.load_state_dict(emb_state_dict)
+        self.embeddings = torch.nn.Embedding.from_pretrained(
+            torch.FloatTensor(embedding_matrix), freeze=freeze_embeddings, padding_idx=0
+        )
 
         self.kernel_num = kernel_num
         self.sigma = sigma
@@ -659,7 +656,7 @@ class Solution:
                 f"Epoch [{ep + 1}/{n_epochs}], Train Loss: {avg_train_loss:.4f},Val nDCG@10: {val_ndcg:.4f}"
             )
 
-            if val_ndcg > 0.94:
+            if val_ndcg > 0.93:
                 break
 
 

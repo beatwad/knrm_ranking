@@ -2,6 +2,7 @@ import requests
 import time
 import sys
 import pandas as pd
+import numpy as np
 
 BASE_URL = "http://0.0.0.0:11000"
 DATA_PATH = "data/QQP/dev.tsv"
@@ -72,6 +73,7 @@ def test_query(df, N_queries):
         print("Not enough data to sample N queries.")
         return False
 
+    np.random.seed(42)
     sample = df.sample(N_queries)
     queries = sample["question2"].tolist()
     expected_ids = sample["qid1"].astype(str).tolist()
